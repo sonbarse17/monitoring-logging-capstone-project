@@ -1,0 +1,18 @@
+{
+  "name": "logging-tracing-demo",
+  "version": "1.0.0",
+  "description": "A sample app with comprehensive logging and tracing capabilities",
+  "main": "app.js",
+  "scripts": {
+    "start": "node -r ./tracing.js app.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.8.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.43.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.49.1",
+    "@opentelemetry/sdk-node": "^0.49.1",
+    "axios": "^1.6.8",
+    "express": "^4.19.2",
+    "winston": "^3.13.0"
+  }
+}
