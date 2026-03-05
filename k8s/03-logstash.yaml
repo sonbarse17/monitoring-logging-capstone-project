@@ -47,6 +47,23 @@ spec:
         image: docker.elastic.co/logstash/logstash:7.17.15
         ports:
         - containerPort: 5044
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        readinessProbe:
+          tcpSocket:
+            port: 5044
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 5044
+          initialDelaySeconds: 45
+          periodSeconds: 20
         volumeMounts:
         - name: config-volume
           mountPath: /usr/share/logstash/pipeline/logstash.conf

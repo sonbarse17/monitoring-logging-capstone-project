@@ -7,9 +7,49 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+const SENSITIVE_KEYS = new Set([
+    'authorization',
+    'cookie',
+    'set-cookie',
+    'x-api-key',
+    'proxy-authorization',
+    'password',
+    'pass',
+    'passwd',
+    'secret',
+    'token',
+    'access_token',
+    'refresh_token',
+    'client_secret',
+    'api_key'
+]);
+
+function sanitizeObject(value, depth = 0) {
+    if (depth > 5 || value == null) {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((item) => sanitizeObject(item, depth + 1));
+    }
+
+    if (typeof value === 'object') {
+        const sanitized = {};
+        for (const [key, val] of Object.entries(value)) {
+            const normalized = String(key).toLowerCase();
+            sanitized[key] = SENSITIVE_KEYS.has(normalized) ? '[REDACTED]' : sanitizeObject(val, depth + 1);
+        }
+        return sanitized;
+    }
+
+    return value;
+}
+
 // Middleware to log all incoming requests and outgoing responses
 app.use((req, res, next) => {
     const startTime = Date.now();
+    const safeHeaders = sanitizeObject(req.headers);
+    const safeBody = req.body && Object.keys(req.body).length > 0 ? sanitizeObject(req.body) : undefined;
 
     // Log the incoming API call
     logger.info(`Incoming API Request: ${req.method} ${req.url}`, {
@@ -17,9 +57,9 @@ app.use((req, res, next) => {
         method: req.method,
         url: req.url,
         ip: req.ip,
-        headers: req.headers,
+        headers: safeHeaders,
         query: req.query,
-        body: req.method === 'POST' ? req.body : undefined
+        body: ['POST', 'PUT', 'PATCH'].includes(req.method) ? safeBody : undefined
     });
 
     // Hook into response finish to log the result

@@ -13,14 +13,41 @@ spec:
       labels:
         app: kibana
     spec:
+      tolerations:
+      - key: karpenter.sh/disrupted
+        operator: Exists
+        effect: NoSchedule
       containers:
       - name: kibana
         image: docker.elastic.co/kibana/kibana:7.17.15
         env:
         - name: ELASTICSEARCH_HOSTS
           value: "http://elasticsearch:9200"
+        - name: SERVER_BASEPATH
+          value: "/monitoring"
+        - name: SERVER_REWRITEBASEPATH
+          value: "true"
         ports:
         - containerPort: 5601
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /monitoring/api/status
+            port: 5601
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /monitoring/api/status
+            port: 5601
+          initialDelaySeconds: 90
+          periodSeconds: 20
 ---
 apiVersion: v1
 kind: Service
