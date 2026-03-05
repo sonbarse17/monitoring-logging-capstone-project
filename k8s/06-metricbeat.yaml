@@ -1,0 +1,208 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: observability
+  labels:
+    k8s-app: metricbeat
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metricbeat
+  labels:
+    k8s-app: metricbeat
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - namespaces
+  - events
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources:
+  - replicasets
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources:
+  - statefulsets
+  - deployments
+  - replicasets
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - ""
+  resources:
+  - nodes/stats
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metricbeat
+subjects:
+- kind: ServiceAccount
+  name: metricbeat
+  namespace: observability
+roleRef:
+  kind: ClusterRole
+  name: metricbeat
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-daemonset-config
+  namespace: observability
+  labels:
+    k8s-app: metricbeat
+data:
+  metricbeat.yml: |-
+    metricbeat.config.modules:
+      path: ${path.config}/modules.d/*.yml
+      reload.enabled: false
+    
+    # Automatically install the pre-built Kibana Dashboards!
+    setup.dashboards.enabled: true
+    setup.dashboards.retry.enabled: true
+    setup.dashboards.retry.interval: 5s
+
+    setup.kibana:
+      host: "kibana:5601"
+      path: "/monitoring"
+
+    output.elasticsearch:
+      hosts: ['elasticsearch:9200']
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-daemonset-modules
+  namespace: observability
+  labels:
+    k8s-app: metricbeat
+data:
+  system.yml: |-
+    - module: system
+      period: 10s
+      metricsets:
+        - cpu
+        - load
+        - memory
+        - network
+        - process
+        - process_summary
+        - core
+        - diskio
+        - socket
+      processes: ['.*']
+      process.include_top_n:
+        by_cpu: 5
+        by_memory: 5
+    - module: system
+      period: 1m
+      metricsets:
+        - filesystem
+        - fsstat
+      processors:
+      - drop_event.when.regexp:
+          system.filesystem.mount_point: '^/(sys|cgroup|proc|dev|etc|host|lib|snap)($|/)'
+  kubernetes.yml: |-
+    - module: kubernetes
+      metricsets:
+        - node
+        - system
+        - pod
+        - container
+        - volume
+      period: 10s
+      host: ${NODE_NAME}
+      hosts: ["https://localhost:10250"]
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      ssl.verification_mode: "none"
+    - module: kubernetes
+      metricsets:
+        - state_node
+        - state_deployment
+        - state_daemonset
+        - state_replicaset
+        - state_pod
+        - state_container
+      period: 10s
+      host: ${NODE_NAME}
+      hosts: ["kube-state-metrics.kube-system.svc.cluster.local:8080"]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metricbeat
+  namespace: observability
+  labels:
+    k8s-app: metricbeat
+spec:
+  selector:
+    matchLabels:
+      k8s-app: metricbeat
+  template:
+    metadata:
+      labels:
+        k8s-app: metricbeat
+    spec:
+      serviceAccountName: metricbeat
+      terminationGracePeriodSeconds: 30
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: metricbeat
+        image: docker.elastic.co/beats/metricbeat:7.17.15
+        args: [
+          "-c", "/etc/metricbeat.yml",
+          "-e",
+          "-system.hostfs=/hostfs",
+        ]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          runAsUser: 0
+        resources:
+          limits:
+            memory: 300Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/metricbeat.yml
+          readOnly: true
+          subPath: metricbeat.yml
+        - name: modules
+          mountPath: /usr/share/metricbeat/modules.d
+          readOnly: true
+        - name: proc
+          mountPath: /hostfs/proc
+          readOnly: true
+        - name: cgroup
+          mountPath: /hostfs/sys/fs/cgroup
+          readOnly: true
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+      - name: config
+        configMap:
+          defaultMode: 0640
+          name: metricbeat-daemonset-config
+      - name: modules
+        configMap:
+          defaultMode: 0640
+          name: metricbeat-daemonset-modules
